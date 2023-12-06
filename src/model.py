@@ -35,12 +35,16 @@ class EmbeddingGAT(MessagePassing):
         self.negative_slope = negative_slope
         self.dropout = dropout
         
-        self.lin = Linear(in_channels, heads * out_channels, bias=False)
+        self.lin = Linear(in_channels, heads * out_channels, bias=True)
         
         # The learnable parameters to compute attention coefficients:
         self.att_src = Parameter(torch.empty(1, heads, 2*out_channels))
         self.att_dst = Parameter(torch.empty(1, heads, 2*out_channels))
         self.bias = Parameter(torch.empty(out_channels))
+        
+        self.batch_norm = nn.BatchNorm1d(out_channels)
+        
+        self.reset_parameters()
         
         
     def reset_parameters(self):
@@ -86,6 +90,8 @@ class EmbeddingGAT(MessagePassing):
         out = self.propagate(edge_index, x=x, alpha=alpha)
         out = out.mean(dim=1)
         out = out + self.bias
+        out = self.batch_norm(out)
+        out = F.relu(out)
         
         if return_attention_weights:
             return out, (edge_index, alpha)
@@ -125,7 +131,6 @@ class GDN(nn.Module):
         self.hid_dim = hid_dim
         self.topk = topk
         self.embedding = nn.Embedding(number_nodes, hid_dim)
-        self.batch_norm_gnn = nn.BatchNorm1d(hid_dim)
         self.batch_norm_out = nn.BatchNorm1d(hid_dim)
         self.dropout = nn.Dropout(0.2)
         
@@ -138,14 +143,14 @@ class GDN(nn.Module):
                              act="relu",
                              norm="batch_norm")
         
+        self.loss_fun = nn.MSELoss(reduction='mean')
+        
         self.reset_parameters()
         
     def reset_parameters(self):
-        nn.init.kaiming_uniform_(self.embedding.weight, a = torch.sqrt(torch.Tensor([5])).item())
-        self.batch_norm_gnn.reset_parameters()
+        nn.init.kaiming_uniform_(self.embedding.weight,
+                                 a = torch.sqrt(torch.Tensor([5])).item())
         self.batch_norm_out.reset_parameters()
-        self.gnn.reset_parameters()
-        self.out_layer.reset_parameters()
     
     @staticmethod
     def get_batch_edge_index(edge_index: Tensor, number_batch: int, number_nodes: int):
@@ -159,7 +164,15 @@ class GDN(nn.Module):
         
         
         
-    def forward(self, batch_x: Tensor):
+    def forward(self, batch_x: Tensor) -> Tensor:
+        """GDN forward
+
+        Args:
+            batch_x (Tensor): node features with size [batch_size, number_nodes, number_node_features]
+
+        Returns:
+            Tensor: node prediction with size [batch_size, number_nodes]
+        """
         B, N, C = batch_x.shape
         assert C == self.in_dim, "the input dim of x not match!"
         
@@ -169,7 +182,7 @@ class GDN(nn.Module):
         
         # get batched KNN edge_index for GNN
         embeddings = self.embedding.weight
-        knn_edge_index = knn_graph(embeddings, k=self.topk, loop=True, cosine=True)
+        knn_edge_index = knn_graph(embeddings, self.topk)
         edge_index_repeat = self.get_batch_edge_index(knn_edge_index, B, N)
         
         # get batched embeddings for GNN
@@ -180,10 +193,12 @@ class GDN(nn.Module):
                                             edge_index_repeat,
                                             embeddings_repeat,
                                             return_attention_weights=True)
-        out = F.relu(self.batch_norm_gnn(out))
         
         # output
         out = torch.mul(out, embeddings_repeat)
         out = self.dropout(self.batch_norm_out(out))
         out = self.out_layer(out) # [number_nodes * batch_size, 1]
         return out.view(B, N)
+    
+    def loss(self, pred: Tensor, label: Tensor):
+        return self.loss_fun(pred, label)

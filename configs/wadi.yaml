@@ -1,0 +1,21 @@
+# Dataset configurations
+dataset: "wadi"
+val_ratio: 0.1
+slide_win: 5
+slide_stride: 1
+
+# Model configurations
+hid_dim: 128
+out_layer_num: 1
+out_layer_hid_dim: 256
+heads: 1
+topk: 30
+
+# Training configurations
+batch_size: 64
+epochs: 50
+lr: 0.001
+weight_decay: 0
+device: -1
+random_seed: 0
+early_stop_patience: 10

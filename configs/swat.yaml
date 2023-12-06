@@ -1,0 +1,21 @@
+# Dataset configurations
+dataset: "swat"
+val_ratio: 0.1
+slide_win: 5
+slide_stride: 1
+
+# Model configurations
+hid_dim: 64
+out_layer_num: 1
+out_layer_hid_dim: 128
+heads: 1
+topk: 15
+
+# Training configurations
+batch_size: 16
+epochs: 50
+lr: 0.001
+weight_decay: 0
+device: -1
+random_seed: 42
+early_stop_patience: 10
