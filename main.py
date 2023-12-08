@@ -1,19 +1,33 @@
 import os
 import argparse
-import random
 import datetime
-import yaml
+import random
 import numpy as np
-
 import torch
-import torch.nn.functional as F
 
 from src.dataset import TimeDataset, get_loaders
 from src.model import GDN
 from src.anomaly_detection import test_performence
 
+
+def seed_everything(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
+    np.random.seed(seed)  # Numpy module.
+    random.seed(seed)  # Python random module.
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.use_deterministic_algorithms(True)
+        
+        
 class TrainingHelper(object):
-    def __init__(self, args) -> None:
+    """
+    Helper class for training.
+    1. save model if val loss is smaller than min val loss
+    2. early stop if val loss does not decrease for early_stop_patience epochs
+    """
+    def __init__(self, args):
         self.min_val_loss = 1e+30
         self.early_stop_count = 0
         
@@ -21,8 +35,7 @@ class TrainingHelper(object):
             os.makedirs(args.model_checkpoint_path)
         model_marker = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
         self.model_checkpoint_path = os.path.join(args.model_checkpoint_path,
-                                                  "{}_model_{}.pth".format(args.dataset,
-                                                                           model_marker))
+                        "{}_model_{}.pth".format(args.dataset, model_marker))
         self.early_stop_patience = args.early_stop_patience
         
         self.early_stop: bool = False
@@ -69,70 +82,33 @@ def test(model: GDN,
 def main():
     parser = argparse.ArgumentParser()
     # dataset configurations
-    parser.add_argument("--dataset", type=str, default="swat",
-                        help="Dataset name.")
-    parser.add_argument("--val_ratio", type=float, default=0.1,
-                        help="Validation ratio.")
-    parser.add_argument("--slide_win", type=int, default=5,
-                        help="Slide window size.")
-    parser.add_argument("--slide_stride", type=int, default=1,
-                        help="Slide window stride.")
+    parser.add_argument("--dataset", type=str, default="swat", help="Dataset name.")
+    parser.add_argument("--val_ratio", type=float, default=0.1, help="Validation ratio.")
+    parser.add_argument("--slide_win", type=int, default=5, help="Slide window size.")
+    parser.add_argument("--slide_stride", type=int, default=1, help="Slide window stride.")
     # model configurations
-    parser.add_argument("--hid_dim", type=int, default=64,
-                        help="Hidden dimension.")
-    parser.add_argument("--out_layer_num", type=int, default=1,
-                        help="Number of out layers.")
-    parser.add_argument("--out_layer_hid_dim", type=int, default=256,
-                        help="Out layer hidden dimension.")
-    parser.add_argument("--heads", type=int, default=1,
-                        help="Number of heads.")
-    parser.add_argument("--topk", type=int, default=20,
-                        help="The knn graph topk.")
+    parser.add_argument("--hid_dim", type=int, default=64, help="Hidden dimension.")
+    parser.add_argument("--out_layer_num", type=int, default=1, help="Number of out layers.")
+    parser.add_argument("--out_layer_hid_dim", type=int, default=128, help="Out layer hidden dimension.")
+    parser.add_argument("--heads", type=int, default=1, help="Number of heads.")
+    parser.add_argument("--topk", type=int, default=15, help="The knn graph topk.")
     # training configurations
-    parser.add_argument("--batch_size", type=int, default=128,
-                        help="Training batch size.")
-    parser.add_argument("--epochs", type=int, default=50,
-                        help="Number of training epochs.")
-    parser.add_argument("--lr", type=float, default=1e-3,
-                        help="Learning rate.")
-    parser.add_argument("--weight_decay", type=float, default=0.0001,
-                        help="Weight decay.")
-    parser.add_argument("--device", type=int, default=0,
-                        help="Training cuda device, -1 for cpu.")
-    parser.add_argument("--random_seed", type=int, default=0,
-                        help="Random seed.")
-    parser.add_argument("--early_stop_patience", type=int, default=10,
-                        help="Early stop patience.")
-    parser.add_argument("--model_checkpoint_path", type=str, default="./checkpoints",
-                        help="Model checkpoint path.")
+    parser.add_argument("--batch_size", type=int, default=16, help="Training batch size.")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs.")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate.")
+    parser.add_argument("--weight_decay", type=float, default=0, help="Weight decay.")
+    parser.add_argument("--device", type=int, default=0, help="Training cuda device, -1 for cpu.")
+    parser.add_argument("--random_seed", type=int, default=2023, help="Random seed.")
+    parser.add_argument("--early_stop_patience", type=int, default=10, help="Early stop patience.")
+    parser.add_argument("--model_checkpoint_path", type=str, default="./checkpoints", help="Model checkpoint path.")
     # config
-    parser.add_argument("--config", type=str, default=None,
-                        help="Config file path.")
     args = parser.parse_args()
+        
     
-    # load config and update args using config
-    if args.config is not None:
-        with open(args.config, 'r') as f:
-            config = yaml.safe_load(f)
-        for key, value in config.items():
-            setattr(args, key, value)
-    # print all args info in a table-like format
-    print("Configurations:")
-    for key, value in vars(args).items():
-        print("\t{}: {}".format(key, value))
+    # set random seed
+    seed_everything(args.random_seed)
     
-    random.seed(args.random_seed)
-    np.random.seed(args.random_seed)
-    torch.manual_seed(args.random_seed)
-    torch.cuda.manual_seed(args.random_seed)
-    torch.cuda.manual_seed_all(args.random_seed)
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = True
-    
-    if torch.cuda.is_available() and args.device >= 0:
-        device = torch.device("cuda:{}".format(args.device))
-    else:
-        device = torch.device("cpu")
+    device = torch.device("cpu") if args.device < 0 else torch.device("cuda:{}".format(args.device))
     
     # load datasets and dataloaders
     print("Loading datasets...")
@@ -171,25 +147,21 @@ def main():
     
     # begin training and validation
     print("Training...")
-    for epoch in range(args.epochs):
+    for epoch in range(1, args.epochs):
         epoch_loss = []
         model.train()
         for batch in train_loader:
-            x, y, label = [item.to(device) for item in batch]
+            x, y, _ = [item.to(device) for item in batch]
             optimizer.zero_grad()
             out = model(x)
             loss = model.loss(out, y)
             loss.backward()
             optimizer.step()
             epoch_loss.append(loss.item())
-        
         train_loss = np.mean(epoch_loss)
-        
         # validation
-        assert val_loader is not None, "val_loader is None!"
         val_loss = test(model, val_loader, device, mode='val')
-        
-        print("Epoch {:>3} train loss: {:.4f}, val loss: {:.4f}".format(epoch, train_loss, val_loss))
+        print("Epoch {:>3}/{} train loss: {:.8f}, val loss: {:.8f}".format(epoch, args.epochs, train_loss, val_loss))
         
         training_helper.check(val_loss, model)
         if training_helper.early_stop:
@@ -200,11 +172,14 @@ def main():
         
     # testing
     print("Testing...")
-    assert test_loader is not None, "test_loader is None!"
+    model.eval()
     model.load_state_dict(torch.load(training_helper.model_checkpoint_path))
     _, val_results = test(model, val_loader, device, mode='test')
     _, test_results = test(model, test_loader, device, mode='test')
-    test_performence(test_results, val_results)
+    all_performance = test_performence(test_results, val_results)
+    
+    return all_performance
 
 if __name__ == '__main__':
     main()
+        

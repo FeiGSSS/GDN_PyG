@@ -81,14 +81,23 @@ def test_performence(test_result:List[np.ndarray],
                                                   test_ground_truth,
                                                   smoothing_window,
                                                   epsilon)
+    all_results = {}
+    
     precision, recall, f1 = test_perf_based_on_best(test_scores, test_anomaly_label)
+    all_results['best'] = {'precision': precision, 'recall': recall, 'f1': f1}
     print("Test (best) Precision: {:.2f} Recall: {:.2f} F1: {:.4f}".format(precision*100, recall*100, f1))
     
     precision, recall, f1 = test_perf_based_on_val(val_scores, test_scores, test_anomaly_label)
+    all_results['val'] = {'precision': precision, 'recall': recall, 'f1': f1}
     print("Test (val) Precision: {:.2f} Recall: {:.2f} F1: {:.4f}".format(precision*100, recall*100, f1))
     
     roc_auc, prc_auc = test_roc_prc_perf(test_scores, test_anomaly_label)
+    all_results['roc_prc'] = {'roc_auc': roc_auc, 'prc_auc': prc_auc}
     print("Test ROC : {:.4f} PRC: {:.4f}".format(roc_auc, prc_auc))
+    
+    return all_results
+    
+    
     
 def test_roc_prc_perf(test_scores, anomaly_labels):
     # test_scores: [num_nodes, total_time_len]

@@ -58,7 +58,7 @@ class EmbeddingGAT(MessagePassing):
                 x: Tensor,
                 edge_index: Tensor,
                 embedding: Tensor,
-                return_attention_weights: bool = True) -> Tensor:
+                return_attention_weights: bool = False) -> Tensor:
         """_summary_
 
         Args:
@@ -115,7 +115,6 @@ class EmbeddingGAT(MessagePassing):
     def message(self, x_j: Tensor, alpha: Tensor) -> Tensor:
         return alpha.unsqueeze(-1) * x_j
 
-
 class GDN(nn.Module):
     def __init__(self,
                  number_nodes: int,
@@ -150,6 +149,8 @@ class GDN(nn.Module):
     def reset_parameters(self):
         nn.init.kaiming_uniform_(self.embedding.weight,
                                  a = torch.sqrt(torch.Tensor([5])).item())
+        self.gnn.reset_parameters()
+        self.out_layer.reset_parameters()
         self.batch_norm_out.reset_parameters()
     
     @staticmethod
@@ -174,7 +175,6 @@ class GDN(nn.Module):
             Tensor: node prediction with size [batch_size, number_nodes]
         """
         B, N, C = batch_x.shape
-        assert C == self.in_dim, "the input dim of x not match!"
         
         # get node features for GNN
         # --> size [number_nodes * batch_size, number_node_features]
@@ -189,10 +189,7 @@ class GDN(nn.Module):
         embeddings_repeat = embeddings.unsqueeze(0).repeat(B, 1, 1).view(-1, self.hid_dim)
         
         # now, input all above into GNN layer
-        out, (edge_index, alpha) = self.gnn(x,
-                                            edge_index_repeat,
-                                            embeddings_repeat,
-                                            return_attention_weights=True)
+        out = self.gnn(x, edge_index_repeat, embeddings_repeat)
         
         # output
         out = torch.mul(out, embeddings_repeat)
